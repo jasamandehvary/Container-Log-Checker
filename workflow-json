@@ -1,0 +1,86 @@
+{
+  "name": "Single container log check (Ollama)",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Manual trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://docker-socket-proxy:2375/containers/test-container/logs",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "stdout", "value": "true" },
+            { "name": "stderr", "value": "true" },
+            { "name": "tail", "value": "100" }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "Get container logs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Strip the few binary header bytes Docker mixes into raw log streams,\n// keep plain readable text only.\nconst raw = String($input.item.json.data ?? $input.item.json ?? '');\nconst cleaned = raw.replace(/[^\\x09\\x0A\\x20-\\x7E]/g, '');\nreturn { json: { logs: cleaned.slice(-3000) } };"
+      },
+      "name": "Clean log text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: \"deepseek-r1:1.5b\", stream: false, prompt: `Here are the most recent logs from a Docker container:\\n\\n${$json.logs}\\n\\nIn plain language: what is this container doing, and is anything wrong?` }) }}",
+        "options": {}
+      },
+      "name": "Ask Ollama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const logs = $('Clean log text').item.json.logs;\nconst answer = $input.item.json.response;\nreturn { json: { logs: logs, answer: answer } };"
+      },
+      "name": "Show answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 300]
+    }
+  ],
+  "connections": {
+    "Manual trigger": {
+      "main": [[{ "node": "Get container logs", "type": "main", "index": 0 }]]
+    },
+    "Get container logs": {
+      "main": [[{ "node": "Clean log text", "type": "main", "index": 0 }]]
+    },
+    "Clean log text": {
+      "main": [[{ "node": "Ask Ollama", "type": "main", "index": 0 }]]
+    },
+    "Ask Ollama": {
+      "main": [[{ "node": "Show answer", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "pinData": {}
+}
